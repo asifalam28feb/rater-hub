@@ -1,0 +1,117 @@
+/**
+ * Dashboard Raterhub - Core Logic
+ * Focus: Task Target Management and Input Validation
+ */
+(function() {
+    'use strict';
+
+    // Internal state management
+    let isTaskActive = true;
+    let currentTaskData = null;
+    let autoLockEnabled = true;
+
+    /**
+     * Anti-Debug & Integrity Protection
+     * These functions detect if the code is being beautified or inspected.
+     */
+    const verifyIntegrity = (function() {
+        let isFirstRun = true;
+        return function(context, callback) {
+            const check = isFirstRun ? function() {
+                if (callback) {
+                    const result = callback.apply(context, arguments);
+                    callback = null; // Prevent re-execution
+                    return result;
+                }
+            } : function() {};
+            isFirstRun = false;
+            return check;
+        };
+    })();
+
+    // Self-executing integrity check (Protects against console modification)
+    (function() {
+        verifyIntegrity(this, function() {
+            const debugRegex = new RegExp('function *\\( *\\)');
+            const traceRegex = new RegExp('\\+\\+\\x20*(?:[a-zA-Z_$][0-9a-zA-Z_$]*)', 'i');
+            const initCheck = _antiDebugHandler('init');
+
+            // If the code is modified/formatted, this trap triggers a loop or 'debugger' statement
+            if (!debugRegex.test(initCheck + 'chain') || !traceRegex.test(initCheck + 'input')) {
+                initCheck('0');
+            } else {
+                _antiDebugHandler();
+            }
+        })();
+    }());
+
+    /**
+     * Main Functional Logic (Inferred from strings and state logic)
+     */
+    const taskManager = {
+        achievedCount: 0,
+        targetCount: 0,
+        
+        // Updates the task UI and progress bar
+        updateProgress: function(newData) {
+            console.log("Raterhub Core: Updating progress...");
+            const currentStats = this.getStats();
+            
+            // Log changes in target
+            if (newData.target !== currentStats.target) {
+                this.logChange('target_update', {
+                    'old': currentStats.target,
+                    'new': newData.target
+                });
+            }
+            
+            this.saveStats(newData);
+            this.refreshUI();
+        },
+
+        // Prevents input if conditions aren't met
+        validateInput: function(inputId, value) {
+            if (!isTaskActive) {
+                console.error("Input disabled: Task is not currently active.");
+                return false;
+            }
+            return true;
+        }
+    };
+
+    /**
+     * Anti-Debug Handler
+     * Used to obfuscate errors and prevent "Stepping Through" in Chrome DevTools
+     */
+    function _antiDebugHandler(command) {
+        function trap(n) {
+            if (typeof n === 'string') {
+                // Trap to crash or hang the debugger
+                return function(a) {}.constructor('while (true) {}').apply('counter');
+            } else {
+                if (('' + n / n).length !== 1 || n % 20 === 0) {
+                    (function() { return true; }).constructor('debugger').call('action');
+                } else {
+                    (function() { return false; }).constructor('debugger').apply('stateObject');
+                }
+            }
+            trap(++n);
+        }
+        try {
+            if (command) return trap;
+            else trap(0);
+        } catch (e) {}
+    }
+
+    // Initialize Global State
+    const globalContext = (function() {
+        let context;
+        try {
+            context = Function('return (function() {}.constructor("return this")( ));')();
+        } catch (e) {
+            context = window;
+        }
+        return context;
+    })();
+
+})();
