@@ -1,0 +1,215 @@
+// ==UserScript==
+// @name         Dashboard Raterhub F4
+// @namespace    http://tampermonkey.net/
+// @version      5.0
+// @description  Prevents submission until Overall Quality is answered.
+// @author       Sahil Khan
+// @match        https://www.raterhub.com/evaluation/rater/task/show?taskIds=*
+// @grant        GM.setValue
+// @grant        GM.getValue
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const TARGET_LABEL_TEXT = "overall quality";
+    const SUBMIT_BUTTON_IDS = ['ewok-task-submit-button', 'ewok-task-submit-done-button'];
+    
+    let isHelperEnabled = true;
+    let isTaskAnswered = false;
+    let isTenSecondDelayActive = true;
+    let isScriptConfigured = false;
+    let radioButtons = [];
+    let mutationObserver = null;
+
+    /**
+     * Creates the UI toggle switch in the Raterhub menu
+     */
+    function createToggleElement(id, labelText, isChecked) {
+        const container = document.createElement('div');
+        container.className = 'juno-toggle-container';
+        container.style.marginTop = '10px';
+        
+        const checkedAttr = isChecked ? 'checked' : '';
+        container.innerHTML = `
+            <label class="juno-toggle-switch">
+                <input type="checkbox" id="${id}" ${checkedAttr}>
+                <span class="juno-slider"></span>
+            </label>
+            <label for="${id}" style="cursor:pointer;">${labelText}</label>
+        `;
+        return container;
+    }
+
+    /**
+     * Injects the "Overall Helper" toggle into the page menu
+     */
+    async function injectMenu() {
+        const menu = document.querySelector('.juno-popup-menu');
+        if (!menu) return false;
+        if (document.getElementById('overall-helper-toggle')) return true;
+
+        console.log('F4 (UDA) Script: Menu found. Injecting "Overall Helper" button.');
+        isHelperEnabled = await GM.getValue('overallHelperIsEnabled', true);
+
+        const toggle = createToggleElement('overall-helper-toggle', 'Enable Overall Helper', isHelperEnabled);
+        menu.appendChild(toggle);
+
+        document.getElementById('overall-helper-toggle').addEventListener('change', handleToggleChange);
+        return true;
+    }
+
+    async function handleToggleChange(event) {
+        isHelperEnabled = event.target.checked;
+        await GM.setValue('overallHelperIsEnabled', isHelperEnabled);
+        console.log('F4 (UDA) Script: Overall Helper enabled:', isHelperEnabled);
+        updateButtonState();
+    }
+
+    /**
+     * Finds the "Overall Quality" section by looking for the specific bold label
+     */
+    function findOverallQualitySection() {
+        const boldElements = document.getElementsByTagName('b');
+        for (const el of boldElements) {
+            if (el.textContent.trim().toLowerCase() === TARGET_LABEL_TEXT) {
+                // Find the parent container (usually a div starting with "editable-")
+                const section = el.closest('div[id^="editable-"]');
+                if (section && window.getComputedStyle(section).display !== 'none') {
+                    return section;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Enables or Disables the Submit button based on script state
+     */
+    function updateButtonState() {
+        const buttons = SUBMIT_BUTTON_IDS.map(id => document.getElementById(id)).filter(b => b);
+        
+        if (!isHelperEnabled) {
+            // Restore buttons to default if helper is off
+            buttons.forEach(btn => {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            });
+            return;
+        }
+
+        // Lock button if: 10s delay is active OR task hasn't been answered yet
+        const shouldLock = isTenSecondDelayActive || !isTaskAnswered;
+        
+        buttons.forEach(btn => {
+            btn.disabled = shouldLock;
+            if (shouldLock) {
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+            } else {
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+        });
+    }
+
+    // Detects when a radio button is clicked
+    function handleRadioClick(event) {
+        const target = event.target;
+        let radio = null;
+
+        if (target.tagName === 'INPUT' && target.type === 'radio') {
+            radio = target;
+        } else {
+            const label = target.closest('label');
+            if (label) {
+                const forId = label.getAttribute('for');
+                if (forId) radio = document.getElementById(forId);
+            }
+        }
+
+        if (radio && radioButtons.includes(radio)) {
+            console.log('F4 (UDA) Script: "Overall Quality" answered.');
+            isTaskAnswered = true;
+            updateButtonState();
+        }
+    }
+
+    // Detects if the answer is cleared (via backspace)
+    function handleKeyUp(event) {
+        if (event.key === 'Backspace') {
+            const active = document.activeElement;
+            const tag = active ? active.tagName.toLowerCase() : '';
+            if (tag === 'textarea' || tag === 'input') return;
+
+            const anyChecked = radioButtons.some(r => r.checked);
+            if (!anyChecked && isTaskAnswered) {
+                console.log('F4 (UDA) Script: "Overall Quality" answer cleared. Re-locking.');
+                isTaskAnswered = false;
+                updateButtonState();
+            }
+        }
+    }
+
+    /**
+     * Initializes the locks when a new task is found
+     */
+    function setupTaskLocks(submitBtn, oqSection) {
+        console.log('F4 (UDA) Script: New task loaded. Configuring locks.');
+        isScriptConfigured = true;
+        
+        radioButtons = Array.from(oqSection.querySelectorAll('input[type="radio"]'));
+        
+        if (radioButtons.length === 0) {
+            console.warn('F4 (UDA) Script: OQ Section found, but no radio buttons inside?');
+            isTaskAnswered = true; 
+        } else {
+            isTaskAnswered = radioButtons.some(r => r.checked);
+        }
+
+        isTenSecondDelayActive = true;
+        console.log('F4 (UDA) Script: 10-second delay is assumed: ACTIVE');
+
+        document.body.addEventListener('click', handleRadioClick, true);
+        document.addEventListener('keyup', handleKeyUp, true);
+
+        // Watch the submit button for the 'disabled' attribute to change
+        // This detects when the main Raterhub script finishes its own 10s timer
+        mutationObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.type === 'attributes' && m.attributeName === 'disabled') {
+                    if (m.target.disabled === false && isTenSecondDelayActive) {
+                        console.log('F4 (UDA) Script: 10-second delay from main script has ended.');
+                        isTenSecondDelayActive = false;
+                        updateButtonState();
+                    }
+                }
+            }
+        });
+
+        mutationObserver.observe(submitBtn, { attributes: true, attributeFilter: ['disabled'] });
+        updateButtonState();
+    }
+
+    // Main loops to watch for page changes
+    const menuObserver = new MutationObserver(async () => {
+        if (await injectMenu()) menuObserver.disconnect();
+    });
+    menuObserver.observe(document.body, { childList: true, subtree: true });
+
+    const taskObserver = new MutationObserver(() => {
+        const submitBtn = document.getElementById(SUBMIT_BUTTON_IDS[0]);
+        if (submitBtn && !isScriptConfigured) {
+            const oqSection = findOverallQualitySection();
+            if (oqSection) setupTaskLocks(submitBtn, oqSection);
+        } else if (!submitBtn && isScriptConfigured) {
+            // Task submitted or page changed
+            isScriptConfigured = false;
+            document.body.removeEventListener('click', handleRadioClick, true);
+            // ... cleanup logic ...
+        }
+    });
+    taskObserver.observe(document.body, { childList: true, subtree: true });
+
+})();
