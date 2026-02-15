@@ -1,0 +1,99 @@
+// ==UserScript==
+// @name         Task Reminder - Raterhub Only
+// @namespace    http://tampermonkey.net/
+// @version      2.2
+// @description  Persistent SOP preview with a reminder footer that pops up on a timer - Limited to Raterhub
+// @author       You
+// @match        https://www.raterhub.com/evaluation/rater*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Settings
+    const intervalTime = 30*60*1000; // Time between popups (30 mins)
+    const displayTime = 5000;       // How long the reminder stays visible (5s)
+    const sopLink = "https://docs.google.com/document/d/1V6DszD-kHV0ccWrv1ZYJnvrX8Efxyfc2R7soIA099P4/edit?tab=t.0#heading=h.lqbq5k3tb7q0";
+
+    const reminders = [
+        { text: "Do not zoom in", icon: "🚫" },
+        { text: "Keep your screen at 100% resolution", icon: "🖥️" },
+        { text: "Check for text and Human Depiction at actual screen size", icon: "👤" }
+    ];
+
+    let index = 0;
+    const sharedWidth = "350px";
+
+    // 1. Create Main Wrapper
+    const wrapper = document.createElement('div');
+    Object.assign(wrapper.style, {
+        position: 'fixed',
+        bottom: '30px',
+        right: '30px',
+        zIndex: '2147483647',
+        display: 'flex',
+        flexDirection: 'column',
+        pointerEvents: 'none'
+    });
+
+    // 2. Create Persistent Preview
+    const previewContainer = document.createElement('div');
+    previewContainer.style.pointerEvents = 'auto';
+    previewContainer.innerHTML = `
+        <div style="width: ${sharedWidth}; height: 200px; background: #2a2a2a; border: 2px solid #4da6ff; border-radius: 12px 12px 0 0; overflow: hidden; position: relative; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">
+            <div style="position: absolute; top: 0; width: 100%; background: #4da6ff; color: white; padding: 4px 10px; font-size: 10px; font-family: sans-serif; z-index: 2; font-weight: bold;">SOP LIVE PREVIEW</div>
+            <iframe src="${sopLink}" style="width: 200%; height: 200%; border: none; transform: scale(0.5); transform-origin: 0 0; position: relative; z-index: 1;"></iframe>
+        </div>
+    `;
+
+    // 3. Create Timed Reminder Footer
+    const footer = document.createElement('div');
+    Object.assign(footer.style, {
+        width: sharedWidth,
+        background: '#1a1a1a',
+        color: 'white',
+        padding: '12px 18px',
+        borderRadius: '0 0 12px 12px',
+        border: '1px solid #333',
+        borderTop: 'none',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        fontFamily: 'sans-serif',
+        fontSize: '13px',
+        boxShadow: '0 10px 25px rgba(0,0,0,0.4)',
+        transition: 'all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+        opacity: '0',
+        transform: 'translateY(-20px)',
+        pointerEvents: 'auto',
+        boxSizing: 'border-box'
+    });
+
+    wrapper.appendChild(previewContainer);
+    wrapper.appendChild(footer);
+    document.body.appendChild(wrapper);
+
+    function showReminder() {
+        const item = reminders[index];
+        footer.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 18px;">${item.icon}</span>
+                <span style="font-weight: 500;">${item.text}</span>
+            </div>
+            <a href="${sopLink}" target="_blank" style="color: #4da6ff; text-decoration: underline; font-weight: bold; font-size: 12px;">SOP</a>
+        `;
+
+        footer.style.opacity = '1';
+        footer.style.transform = 'translateY(0)';
+
+        setTimeout(() => {
+            footer.style.opacity = '0';
+            footer.style.transform = 'translateY(-20px)';
+            index = (index + 1) % reminders.length;
+        }, displayTime);
+    }
+
+    setInterval(showReminder, intervalTime);
+    setTimeout(showReminder, 1000);
+})();
