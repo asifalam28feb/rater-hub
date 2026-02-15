@@ -1,0 +1,82 @@
+// ==UserScript==
+// @name         Dashboard Raterhub F1
+// @namespace    http://tampermonkey.net/
+// @version      5.0
+// @description  Sample Description
+// @author       Sahil Khan
+// @match        https://www.raterhub.com/evaluation/*
+// @grant        GM_xmlhttpRequest
+// @connect      gist.githubusercontent.com
+// @run-at       document-end
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const GIST_URL = 'https://gist.githubusercontent.com/sahiillx/bbd10151a25220de8d26ad02e94831f1/raw/c2dae17dda972cfc068b35b2e58d9e249cc857bc/raterhub.core.js';
+    const CACHE_KEY = 'rh_core_cache_v3';
+    const CACHE_DURATION = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
+
+    // Function to execute the downloaded JavaScript code
+    function executeScript(code) {
+        console.log('Raterhub Loader: Executing core script...');
+        try {
+            eval(code);
+        } catch (err) {
+            console.error('Raterhub Loader: Error executing script.', err);
+        }
+    }
+
+    // Function to download the script from GitHub
+    function downloadScript() {
+        console.log('Raterhub Loader: Downloading new script from Gist...');
+        
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: GIST_URL,
+            onload: function(response) {
+                if (response.status === 200) {
+                    const dataToCache = {
+                        code: response.responseText,
+                        timestamp: Date.now()
+                    };
+                    // Save to local storage for next time
+                    localStorage.setItem(CACHE_KEY, JSON.stringify(dataToCache));
+                    // Run the code
+                    executeScript(dataToCache.code);
+                } else {
+                    console.error('Raterhub Loader: Failed to fetch script. Status: ' + response.status);
+                }
+            },
+            onerror: function(err) {
+                console.error('Raterhub Loader: Network error.', err);
+            }
+        });
+    }
+
+    // Main logic: Check cache or download
+    function init() {
+        const cachedData = localStorage.getItem(CACHE_KEY);
+        
+        if (cachedData) {
+            try {
+                const parsed = JSON.parse(cachedData);
+                const age = Date.now() - parsed.timestamp;
+
+                // If the cache is less than 8 hours old, use it
+                if (age < CACHE_DURATION) {
+                    console.log('Raterhub Loader: Loading from cache.');
+                    executeScript(parsed.code);
+                    return;
+                }
+            } catch (e) {
+                console.warn('Raterhub Loader: Cache corrupted. Re-fetching.');
+            }
+        }
+        
+        // If no cache or cache expired, download it
+        downloadScript();
+    }
+
+    init();
+})();
