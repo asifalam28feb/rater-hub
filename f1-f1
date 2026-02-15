@@ -1,0 +1,155 @@
+/**
+ * Raterhub Dashboard Core
+ * Components: Task Tracker, Multi-tab Sync (ContainerHide), and UT Stopwatch
+ */
+(function() {
+    'use strict';
+
+    // Unique ID for this specific browser tab
+    const TAB_ID = Date.now().toString() + Math.random().toString();
+    
+    const STORAGE_KEYS = {
+        TASKS: 'taskData_v2',
+        STOPWATCH: 'raterhub_stopwatch_data',
+        REGISTRY: 'RATERHUB_OPEN_PAGES_REGISTRY_V1',
+        ACTIVE_TASK: 'RATERHUB_ACTIVE_TASK_TAB_ID'
+    };
+
+    // Global session health metrics
+    const sessionState = {
+        integrityScore: 100,
+        eventBuffer: [],
+        lastSync: Date.now()
+    };
+
+    /**
+     * 1. SECURE STORAGE SYSTEM
+     * Prevents users from manually editing task counts in LocalStorage
+     * by using Base64 encoding and a mathematical Checksum.
+     */
+    const SecureStorage = {
+        save(key, value) {
+            const jsonString = JSON.stringify(value);
+            const checksum = this.calculateChecksum(jsonString);
+            const payload = {
+                d: btoa(unescape(encodeURIComponent(jsonString))),
+                c: checksum
+            };
+            localStorage.setItem(key, JSON.stringify(payload));
+        },
+
+        load(key) {
+            const raw = localStorage.getItem(key);
+            if (!raw) return null;
+            try {
+                const envelope = JSON.parse(raw);
+                const decoded = decodeURIComponent(escape(atob(envelope.d)));
+                // Verify checksum to detect tampering
+                if (this.calculateChecksum(decoded) !== envelope.c) {
+                    console.error("Security: Data tampering detected for " + key);
+                    return null;
+                }
+                return JSON.parse(decoded);
+            } catch (e) { return null; }
+        },
+
+        calculateChecksum(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = ((hash << 5) - hash) + str.charCodeAt(i);
+                hash |= 0;
+            }
+            return hash.toString(16);
+        }
+    };
+
+    /**
+     * 2. TASK TRACKER
+     * Manages daily goals, achieved counts, and "Morning/Evening" shift resets.
+     */
+    const TaskTracker = {
+        init() {
+            let data = SecureStorage.load(STORAGE_KEYS.TASKS);
+            const today = this.getOperationalDate();
+
+            // If data is missing or from a previous day, reset it
+            if (!data || data.opDate !== today) {
+                data = {
+                    target: 200,
+                    achieved: 0,
+                    opDate: today,
+                    hourly: {}, // Map of tasks per hour
+                    taskHistory: [], // List of completed Task IDs
+                    shiftType: (new Date().getHours() >= 16) ? 'evening' : 'morning'
+                };
+            }
+            this.state = data;
+            this.renderUI();
+        },
+
+        getOperationalDate() {
+            const now = new Date();
+            // Platform reset usually happens at 4 AM
+            if (now.getHours() < 4) now.setDate(now.getDate() - 1);
+            return now.toISOString().split('T')[0];
+        }
+    };
+
+    /**
+     * 3. MULTI-TAB SYNC (ContainerHide)
+     * If you open a task in Tab A, Tab B will automatically hide its content
+     * to prevent "overlapping" or duplicate billing errors.
+     */
+    const TabGuard = {
+        init() {
+            window.addEventListener('storage', (e) => {
+                if (e.key === STORAGE_KEYS.ACTIVE_TASK) {
+                    this.enforceSingleTabPolicy();
+                }
+            });
+            this.updatePresence();
+            setInterval(() => this.updatePresence(), 5000); // Heartbeat
+        },
+
+        enforceSingleTabPolicy() {
+            const currentActiveTab = SecureStorage.load(STORAGE_KEYS.ACTIVE_TASK);
+            const container = document.querySelector('.container');
+
+            if (currentActiveTab && currentActiveTab !== TAB_ID) {
+                // Another tab is working on a task; hide this one.
+                if (container) container.style.display = 'none';
+                this.showLockoutNotice();
+            } else {
+                if (container) container.style.display = 'block';
+                this.removeLockoutNotice();
+            }
+        }
+    };
+
+    /**
+     * 4. UT STOPWATCH
+     * Tracks Utilization Time. Automatically pauses if the page is hidden.
+     */
+    const UTStopwatch = {
+        init() {
+            this.data = SecureStorage.load(STORAGE_KEYS.STOPWATCH) || { elapsed: 0, isRunning: false };
+            if (this.data.isRunning) this.start();
+        },
+        // ... (Timing and formatting logic)
+    };
+
+    // MAIN INITIALIZATION
+    function boot() {
+        TaskTracker.init();
+        TabGuard.init();
+        UTStopwatch.init();
+        
+        // Prevent browser 'Back' button errors on task pages
+        if (window.location.href.includes('task/show')) {
+            history.pushState(null, "", window.location.href);
+            window.onpopstate = () => history.go(1);
+        }
+    }
+
+    boot();
+})();
